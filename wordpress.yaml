@@ -1,0 +1,157 @@
+- name: Deploying Wordpress using Ansible
+  hosts: node #Host yang akan digunakan dapat berupa hostname atau grup di inventory
+  become: true #Memberikan privilege sudo
+  vars: #Variabel yang digunakan
+    - require_package:
+      - mariadb-server
+      - apache2
+      - unzip
+      - libapache2-mod-php
+      - python3-pymysql
+      - php-mysql
+      - php-curl
+      - php-gd
+      - php-mbstring
+      - php-xml
+      - php-xmlrpc
+      - php-soap
+      - php-intl
+      - php-zip
+    - db_name: wordpress_db
+    - db_user: student
+    - db_password: password
+    - db_socket: /var/run/mysqld/mysqld.sock
+  tasks: #Perintah yang akan dijalankan
+    - name: installing requirements package
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ require_package }}"
+
+    - name: enable apache2
+      service:
+        name: apache2
+        state: started
+        enabled: true
+
+    - name: enable mariadb
+      service:
+        name: mariadb
+        state: started
+        enabled: true
+
+    - name: create directory wordpress
+      file:
+        path: /tmp/wordpress
+        state: directory
+      become: false
+
+    - name: download wordpress
+      get_url:
+        url: https://wordpress.org/latest.zip
+        dest: /tmp/wordpress/wordpress.zip
+      become: false
+
+    - name: Extract wordpress
+      unarchive:
+        src: /tmp/wordpress/wordpress.zip
+        dest: /tmp/
+        remote_src: true
+      become: false
+
+    - name: remove wordpress zip
+      file:
+        path: /tmp/wordpress/wordpress.zip
+        state: absent
+
+    - name: copy env wordpress
+      copy:
+        src: /tmp/wordpress/wp-config-sample.php
+        dest: /tmp/wordpress/wp-config.php
+        remote_src: true
+      become: false
+
+    - name: Update Wordpress config file
+      lineinfile:
+        path: /tmp/wordpress/wp-config.php
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - {'regexp': "define\\( 'DB_NAME', '(.)+' \\);", 'line': "define( 'DB_NAME', '{{ db_name }}' );"}  
+        - {'regexp': "define\\( 'DB_USER', '(.)+' \\);", 'line': "define( 'DB_USER','{{ db_user }}' );"}
+        - {'regexp': "define\\( 'DB_PASSWORD', '(.)+' \\);", 'line': "define( 'DB_PASSWORD', '{{ db_password }}' );"}
+
+    - name: find all directories in wordpress directory
+      find:
+        path: /tmp/wordpress
+        file_type: directory
+      register: directory_wordpress
+
+    - name: set permission all directories in wordpress directory
+      file:
+        path: "{{ item.path }}"
+        mode: 0750
+      loop: "{{ directory_wordpress.files }}"
+
+    - name: find all files in wordpress directory
+      find:
+        path: /tmp/wordpress
+        file_type: file
+      register: file_wordpress
+
+    - name: set permission all files in wordpress directory
+      file:
+        path: "{{ item.path }}"
+        mode: 0640
+      loop: "{{ file_wordpress.files }}"
+    - name: create user student in mariadb
+      mysql_user:
+        login_user: root
+        login_unix_socket: "{{ db_socket }}"
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: '*.*:ALL'
+        state: present
+
+    - name: create database wordpress_db
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: "{{ db_socket }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+
+    - name: Edit apache2 configuration
+      lineinfile:
+        path: /etc/apache2/sites-enabled/000-default.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - {'regexp' : "(.)+ServerAdmin webmaster@localhost", 'line': "\tServerAdmin webmaster@'{{ ansible_host }}'\n \tServerName '{{ ansible_host }}'"}
+        - {'regexp' : "(.)+DocumentRoot /var/www/html", 'line' : "\tDocumentRoot /var/www/wordpress"}
+
+    - name: copying wordpress to /var/www
+      copy:
+        src: /tmp/wordpress
+        dest: /var/www
+        remote_src: yes
+
+    - name: set permission for wordpress directory
+      file:
+        path: /var/www/wordpress
+        state: directory
+        recurse: yes
+        owner: www-data
+        group: www-data
+      notify: restart apache2 service
+
+  handlers:
+    - name: restart apache2 service
+      service:
+        name: apache2
+        state: reloaded
+
+    - name: restart mariadb service
+      service:
+        name: mariadb
+        state: restarted
