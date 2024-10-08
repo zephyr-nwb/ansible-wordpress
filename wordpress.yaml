@@ -127,7 +127,7 @@
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       with_items:
-        - {'regexp' : "(.)+ServerAdmin webmaster@localhost", 'line': "\tServerAdmin webmaster@'{{ ansible_host }}'\n \tServerName '{{ ansible_host }}'"}
+        - {'regexp' : "(.)+ServerAdmin webmaster@localhost", 'line': "\tServerAdmin webmaster@{{ ansible_host }}\n \tServerName {{ ansible_host }}"}
         - {'regexp' : "(.)+DocumentRoot /var/www/html", 'line' : "\tDocumentRoot /var/www/wordpress"}
 
     - name: copying wordpress to /var/www
